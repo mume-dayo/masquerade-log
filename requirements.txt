@@ -1,3 +1,4 @@
-
-discord.py>=2.3.0
-asyncio
+discord.py
+Flask
+waitress # Waitressは本番環境向けのWSGIサーバーです。
+gunicorn
