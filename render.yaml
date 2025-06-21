@@ -1,12 +1,19 @@
-
 services:
   - type: web
-    name: discord-masquerade-bot
+    name: discord-bot
     env: python
+    # ビルドコマンドで依存関係をインストール
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
-    plan: free
+    # 起動コマンドでGunicornを使用してFlaskアプリを起動し、
+    # そのFlaskアプリの起動中にDiscordボットも開始する
+    startCommand: gunicorn main:app --worker-class gevent --bind 0.0.0.0:$PORT
     envVars:
       - key: DISCORD_BOT_TOKEN
-        sync: false
-    healthCheckPath: /
+        sync: false # RenderのGUIでこの値を設定することを推奨します
+    # ヘルスチェックのパスを設定
+    healthCheckPath: /health
+    # ボットがWebソケット接続を維持するために、タイムアウトを長く設定することをお勧めします
+    # これはWebサービスタイプにのみ適用されます
+    # ボットがアイドル状態になってもスリープしないように、月額有料プランが必要です
+    # freeプランの場合、30分アイドル状態だと停止します
+    timeoutSeconds: 300 # 例: 5分
