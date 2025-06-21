@@ -1,5 +1,3 @@
-discord.py
-Flask
-waitress
-gunicorn
-gevent
+
+discord.py>=2.5.2
+flask>=2.3.0
