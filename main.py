@@ -1,12 +1,27 @@
+
 import discord
 from discord.ext import commands
 import asyncio
 import os
 from datetime import datetime, timedelta
-from flask import Flask, jsonify # Flaskを追加
+from threading import Thread
+from flask import Flask
+import time
 
-# Flaskアプリのインスタンスを作成
+# Flask app for keep-alive
 app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Discord Bot is running!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
 
 # Bot setup with all intents
 intents = discord.Intents.all()
@@ -16,20 +31,6 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     print(f'Bot is in {len(bot.guilds)} guilds')
-
-# 新しいエンドポイントを追加（Renderのヘルスチェック用）
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-@app.route('/health')
-def health_check():
-    # ボットがログインしているかどうかの簡易チェック
-    if bot.is_ready():
-        return jsonify(status="healthy", bot_user=str(bot.user))
-    else:
-        return jsonify(status="unhealthy", message="Bot not ready"), 503
-
 
 @bot.command(name='serverlogs')
 @commands.has_permissions(view_audit_log=True)
@@ -476,7 +477,7 @@ async def send_message_fast(webhook, message):
         await webhook.send(
             content=message.content or "[添付ファイル]",
             username=message.author.display_name,
-            avatar_url=message.author.avatar.url if message.avatar else message.author.default_avatar.url,
+            avatar_url=message.author.avatar.url if message.author.avatar else message.author.default_avatar.url,
             files=files,
             wait=False  # 応答を待たない
         )
@@ -596,87 +597,13 @@ async def on_command_error(ctx, error):
     else:
         await ctx.send(f"エラーが発生しました: {str(error)}")
 
-# BotとFlaskアプリを同時に実行するための関数
-async def main():
+# Botを起動
+if __name__ == "__main__":
+    # Keep-alive機能を開始
+    keep_alive()
+    
     token = os.getenv('DISCORD_BOT_TOKEN')
     if not token:
-        print("DISCORD_BOT_TOKENが設定されていません。Secretsに追加してください。")
-        return
-
-    # Flaskサーバーを別スレッドで実行
-    # RenderはPORT環境変数を使用するため、それを取得してFlaskに渡す
-    port = int(os.getenv("PORT", 8080)) # デフォルトは8080
-
-    # Flaskアプリを非同期で実行するためのTaskを作成
-    # Werkzeug (Flaskの開発サーバー) は非同期ではないため、同期的に起動し、
-    # その間はDiscordボットが動かない可能性があります。
-    # 実際には、gunicornなどのWSGIサーバーと組み合わせるのがより適切です。
-    # ここでは、単純化のためにrun_forever内でタスクとして起動します。
-
-    # Discordボットを起動
-    discord_task = asyncio.create_task(bot.start(token))
-
-    # Flaskアプリを起動するタスク
-    # Flaskのrunはブロッキングなので、別スレッドまたはプロセスで実行するか、
-    # hypercorn/gunicorn with uvicorn worker のようなASGIサーバーを使用する必要があります。
-    # RenderのWebサービスでは、gunicornを推奨します。
-    
-    # 簡単な例として、ボットが起動してからFlaskを起動しますが、
-    # 実際にはgunicorn経由で実行するように変更します。
-    print(f"Starting Flask app on port {port}")
-    # Flaskアプリの起動はブロッキングなので、非同期関数内で直接run()を呼び出すのは避けます。
-    # Renderでは、`startCommand`でGunicornを使用してFlaskアプリを起動するのが一般的です。
-    
-    # Discordボットのタスクが完了するまで待機（実質的にボットが停止するまで）
-    await discord_task
-
-
-if __name__ == "__main__":
-    # 非同期イベントループを取得し、main関数を実行
-    # RenderのWebサービスでは、FlaskとDiscordボットを同時に動かすためにGunicornを使用します。
-    # 以下の直接実行はローカルテスト用です。
-    
-    # ローカルテスト時にFlaskとDiscordボットを両方動かす場合の処理
-    # Renderではこの部分の起動方法は異なります
-    
-    # DiscordボットとFlaskを同時に動かすためのタスクをスケジュール
-    # RenderのWebサービスで動かすためのGunicornコマンドに対応させる
-    
-    # 環境変数からポートを取得、なければ5000（Flaskのデフォルト）
-    port = int(os.environ.get("PORT", 5000))
-
-    # Discordボットの起動とFlaskサーバーの起動を並行して行うためのイベントループ
-    loop = asyncio.get_event_loop()
-
-    # Discordボットのタスク
-    discord_task = loop.create_task(bot.start(os.getenv('DISCORD_BOT_TOKEN')))
-
-    # Flaskアプリを非同期的に起動するための関数 (gunicornを使用しない簡易版)
-    async def run_flask():
-        # Werkzeug (Flaskの開発サーバー) は同期なので、
-        # asyncio.to_threadを使って別スレッドで実行します。
-        # 本番環境ではGunicorn + Green Unicorn worker (gevent/eventlet)
-        # または uvicorn + gunicorn を使用します。
-        print(f"Attempting to run Flask app on port {port} using asyncio.to_thread...")
-        try:
-            from waitress import serve
-            serve(app, host="0.0.0.0", port=port)
-            print(f"Flask app (Waitress) running on port {port}")
-        except Exception as e:
-            print(f"Error running Flask app with Waitress: {e}")
-            # Fallback to Flask's default run if waitress fails or isn't installed
-            app.run(host="0.0.0.0", port=port, debug=False) # debug=False for production
-            print(f"Flask app running on port {port} (default)")
-
-
-    flask_task = loop.create_task(asyncio.to_thread(run_flask)) # Flaskを別スレッドで実行
-
-    # 両方のタスクが完了するのを待つ
-    # 通常、Discordボットは停止しないので、これはボットが稼働し続けることを意味します。
-    # Flaskサーバーも同様に稼働し続けます。
-    try:
-        loop.run_until_complete(asyncio.gather(discord_task, flask_task))
-    except KeyboardInterrupt:
-        print("Shutting down...")
-    finally:
-        loop.close()
+        print("DISCORD_BOT_TOKENが設定されていません。環境変数に追加してください。")
+    else:
+        bot.run(token)
